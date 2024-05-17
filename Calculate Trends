@@ -1,0 +1,74 @@
+
+# This script calculates statistically significant trends using the Modified Mann-Kendall test
+# Author: Yunuen Reygadas
+
+######################################################################################################
+#Set user-defined parameters 
+#Working directory where the csv file with coordinates & raster values is located
+dir <-"D:/AAG/Map/AAG_Texas/PPT_PRISM/April"
+#Name of the csv file with coordinates and raster values
+rasValues<- "PPT_pts_apr.csv"
+#Number of study period years
+years<- 12
+#Name of the output csv file that will contain trend estimations
+output<-"Trend_PPT_apr.csv"
+######################################################################################################
+
+# Require the packages needed
+library(rkt)
+library(modifiedmk)
+
+#Set the working directory
+setwd(dir)
+
+#Bring the inpute file into R
+raw <- read.table(rasValues, header = TRUE, sep = ",")
+
+#Create a dataframe to store the results
+annualTrends<-data.frame()
+
+#Create a LOOP that goes through each row of the input file
+for (row in 1:nrow(raw)) {
+  
+  #Extract the pixel ID and coordinates
+  id <- (raw[row,1])
+  x<- (raw[row,(years+2)])
+  y<- (raw[row,(years+3)])
+  print(paste("id",id,"x",x,"y",y))
+  
+  #Extract row values and convert them to vector
+  vector<-unlist(raw[row,3:(years+2)])
+  
+  #Calculate a Modiffied Mann-Kendall Test For Serially Correlated Data u
+  #using Hamed and Rao (1998) Variance Correction Approach. (modfiedmk package)
+  mmk= mmkh(vector,ci=0.95)
+  
+  #Convert the outputs into a matrix
+  mmk <- t(unlist(mmk))
+  
+  #Extract the info needed from the output, pvalue(2), tau(6), slope(7)
+  pv<- mmk[2]
+  tau<- mmk[6]
+  sl<- mmk[7]
+  
+  #Assign a trend name at 0.05 
+  TrendName<-ifelse(pv <= 0.05 & tau < 0,"Negative",
+                    ifelse(pv<= 0.05 & tau > 0,"Positive",
+                           ifelse(pv > 0.05,"NotSignificant")))                
+  
+  #Store the results in the dataframe previously created
+  annualTrends <- rbind(annualTrends,data.frame(
+    "pointid"= id,
+    "x_coordinates"=x,
+    "y_coordinates"=y,
+    "pv"= pv,
+    "tau" = tau,
+    "slp" = sl,
+    "trendName" = TrendName))
+}
+
+#Export the dataframe as a .csv file
+write.csv(annualTrends, paste0(dir,"/", output), row.names = FALSE)
+
+warnings()
+
