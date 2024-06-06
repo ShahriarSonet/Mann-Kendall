@@ -1,0 +1,88 @@
+var PRISM = ee.ImageCollection("OREGONSTATE/PRISM/AN81d"),
+    polygon = ee.FeatureCollection("projects/test-project-mss-406918/assets/TexasBoundary");
+
+/////////////////////// User-defined parameters ////////////////////
+
+var startYear = 1981;
+var endYear= 1984;
+var studyArea = polygon;
+// List with months
+var months = ee.List.sequence(1, 12);
+// List with years
+var years = ee.List.sequence(startYear, endYear);
+
+///////////////// Calculate mean temperature totals /////////////////////
+
+// Filter image collection (pentads)
+var pre = ee.ImageCollection(PRISM)
+  .filterDate(startYear.toString()+'-01-01', endYear.toString()+'-12-31')
+  .filterBounds(studyArea);
+print("Pentad Image Collection", pre);
+
+// Calculate monthly mean temperature totals 
+var monthlyMeanTemperature =  ee.ImageCollection.fromImages(
+  years.map(function (y) {
+    return months.map(function(m) {
+      var w = pre.filter(ee.Filter.calendarRange(y, y, 'year'))
+                    .filter(ee.Filter.calendarRange(m, m, 'month'))
+                    .select('tmean') // Selecting mean temperature band
+                    .mean(); // Calculating mean
+      return w.set('year', y)
+              .set('month', m)
+              .set('system:time_start', ee.Date.fromYMD(y, m, 1));
+                        
+    });
+  }).flatten() 
+);
+print("Monthly Mean Temperature Image Collection", monthlyMeanTemperature);
+
+/////////////// Show the first monthly raster ///////////////////////
+
+Map.centerObject(studyArea, 5);
+var monthlyMeanTemperature_first = monthlyMeanTemperature.first();
+Map.addLayer(monthlyMeanTemperature_first.clip(studyArea), {
+  "opacity": 1,
+  "bands": ["tmean"],
+  "min": -20, // Adjust as needed
+  "max": 40, // Adjust as needed
+  "gamma": 1
+}, "Example: Mean Temp_" + startYear.toString());
+
+///Export all images from the monthly image collection collection////
+
+var ExportCol = function(col, folder, scale, type,
+                         nimg, maxPixels, region) {
+    type = type || "float";
+    nimg = nimg || 500;
+    scale = scale || 1000;
+    maxPixels = maxPixels || 1e10;
+
+    var colList = col.toList(nimg);
+    var n = colList.size().getInfo();
+
+    for (var i = 0; i < n; i++) {
+      var img = ee.Image(colList.get(i));
+      var id = img.get('year').getInfo();
+      var month = img.get('month').getInfo();
+      region = region || img.geometry().bounds().getInfo()["coordinates"];
+
+      var imgtype = {"float":img.toFloat(), 
+                     "byte":img.toByte(), 
+                     "int":img.toInt(),
+                     "double":img.toDouble()
+                    };
+
+      Export.image.toDrive({
+        image:imgtype[type],
+        description: 'MeanTemp_'+id+'_'+month,
+        folder: folder,
+        fileNamePrefix: 'MeanTemp_'+id+'_'+month,
+        region: region,
+        scale: scale,
+        maxPixels: maxPixels});
+    }
+  };
+
+ExportCol(monthlyMeanTemperature, "MeanTemp_rasters", 4500, "double", 500, 1e10, studyArea);
+
+print("All done");
