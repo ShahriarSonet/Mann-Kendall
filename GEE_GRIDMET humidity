@@ -1,0 +1,85 @@
+var GRIDMET = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET"),
+    polygon = ee.FeatureCollection("projects/test-project-mss-406918/assets/TexasBoundary");
+
+var startYear = 2021;
+var endYear = 2023;
+var studyArea = polygon;
+
+// List with months
+var months = ee.List.sequence(1, 12);
+// List with years
+var years = ee.List.sequence(startYear, endYear);
+
+///////////////// Calculate average specific humidity /////////////////////
+
+// Filter image collection (pentads)
+
+var pre = ee.ImageCollection(GRIDMET)
+  .filterDate(startYear.toString() + '-01-01', endYear.toString() + '-12-31')
+  .filterBounds(studyArea);
+print("Pentad Image Collection", pre);
+
+// Calculate monthly specific humidity averages
+
+var monthlySpecificHumidity = ee.ImageCollection.fromImages(
+  years.map(function (y) {
+    return months.map(function (m) {
+      var w = pre.filter(ee.Filter.calendarRange(y, y, 'year'))
+        .filter(ee.Filter.calendarRange(m, m, 'month'))
+        .select('sph')        // Selecting specific humidity band
+        .mean();              // Calculate mean
+      return w.set('year', y)
+        .set('month', m)
+        .set('system:time_start', ee.Date.fromYMD(y, m, 1));
+    });
+  }).flatten()
+);
+print("Monthly Specific Humidity Image Collection", monthlySpecificHumidity);
+
+/////////////// Show the first monthly raster ///////////////////////
+
+Map.centerObject(studyArea, 05);
+var monthlySpecificHumidity_first = monthlySpecificHumidity.first();
+Map.addLayer(monthlySpecificHumidity_first.clip(studyArea),
+  { "opacity": 1, "bands": ["sph"], "max": 1000, "gamma": 1 },
+  "Example: SPH_" + startYear.toString());
+
+///Export all images from the monthly image collection////
+var ExportCol = function (col, folder, scale, type,
+  nimg, maxPixels, region) {
+  type = type || "float";
+  nimg = nimg || 500;
+  scale = scale || 1000;
+  maxPixels = maxPixels || 1e10;
+
+  var colList = col.toList(nimg);
+  var n = colList.size().getInfo();
+
+  for (var i = 0; i < n; i++) {
+    var img = ee.Image(colList.get(i));
+    var id = img.get('year').getInfo();
+    var month = img.get('month').getInfo();
+    region = region || img.geometry().bounds().getInfo()["coordinates"];
+
+    var imgtype = {
+      "float": img.toFloat(),
+      "byte": img.toByte(),
+      "int": img.toInt(),
+      "double": img.toDouble()
+    };
+
+    Export.image.toDrive({
+      image: imgtype[type],
+      description: 'SPH_' + id + '_' + month,
+      folder: folder,
+      fileNamePrefix: 'SPH_' + id + '_' + month,
+      region: region,
+      scale: scale,
+      maxPixels: maxPixels
+    });
+  }
+};
+
+ExportCol(monthlySpecificHumidity, "SPH_rasters", 4500, "double", 500, 1e10, studyArea);
+
+print("All done");
